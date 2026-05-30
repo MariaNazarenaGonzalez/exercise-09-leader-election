@@ -5,10 +5,22 @@ from sqlalchemy.orm import Session
 from src.database import Base, engine, get_db
 from src.models import Node
 from src.schemas import NodeCreate, NodeResponse, NodeUpdate
+from src import election
+from pydantic import BaseModel
 
-Base.metadata.create_all(bind=engine)
+from sqlalchemy.exc import ProgrammingError, IntegrityError
+try:
+    Base.metadata.create_all(bind=engine)
+except (ProgrammingError, IntegrityError):
+    pass  # Otro nodo ya creó la tabla — está bien
 app = FastAPI()
 
+# ── Start heartbeat background thread on startup ──────────────────────────────
+@app.on_event("startup")
+def on_startup():
+    election.start_background_heartbeat()
+
+# ── Health ─────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     try:
@@ -19,6 +31,7 @@ def health(db: Session = Depends(get_db)):
     count = db.query(Node).filter(Node.status == "active").count()
     return {"status": "ok", "db": db_status, "nodes_count": count}
 
+# ── Node CRUD ──────────────────────────────────────────────────────────────────
 @app.post("/api/nodes", response_model=NodeResponse, status_code=201)
 def register_node(node: NodeCreate, db: Session = Depends(get_db)):
     existing = db.query(Node).filter(Node.name == node.name).first()
@@ -64,3 +77,35 @@ def delete_node(name: str, db: Session = Depends(get_db)):
     node.updated_at = datetime.now(timezone.utc)
     db.commit()
     return Response(status_code=204)
+
+# ── Election endpoints (Bully protocol messages) ───────────────────────────────
+class ElectionMsg(BaseModel):
+    sender_id: int
+
+class CoordinatorMsg(BaseModel):
+    leader_id: int
+    leader_url: str
+
+@app.post("/election/election", status_code=200)
+def receive_election(msg: ElectionMsg):
+    """Receive an ELECTION message — reply 200 (= OK) and start own election."""
+    election.handle_election_message(msg.sender_id)
+    return {"ok": True}
+
+@app.post("/election/coordinator", status_code=200)
+def receive_coordinator(msg: CoordinatorMsg):
+    """Receive a COORDINATOR (victory) message."""
+    election.handle_coordinator_message(msg.leader_id, msg.leader_url)
+    return {"ok": True}
+
+@app.get("/election/status")
+def election_status():
+    """Heartbeat + election state — used by peers to check if leader is alive."""
+    return election.get_status()
+
+@app.post("/election/start", status_code=202)
+def trigger_election():
+    """Manually trigger an election (useful for testing)."""
+    import threading
+    threading.Thread(target=election.start_election, daemon=True).start()
+    return {"message": "election started"}
