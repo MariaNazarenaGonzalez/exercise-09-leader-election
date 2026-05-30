@@ -9,15 +9,20 @@ from src import election
 from pydantic import BaseModel
 
 from sqlalchemy.exc import ProgrammingError, IntegrityError
+
 try:
     Base.metadata.create_all(bind=engine)
 except (ProgrammingError, IntegrityError):
-    pass  # Otro nodo ya creó la tabla — está bien
+    pass  # Another node already created the table — that's fine
+
 app = FastAPI()
 
 # ── Start heartbeat background thread on startup ──────────────────────────────
 @app.on_event("startup")
 def on_startup():
+    import threading
+    # Trigger election immediately at boot (don't wait for heartbeat timeout)
+    threading.Thread(target=election.start_election, daemon=True).start()
     election.start_background_heartbeat()
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -109,3 +114,13 @@ def trigger_election():
     import threading
     threading.Thread(target=election.start_election, daemon=True).start()
     return {"message": "election started"}
+
+@app.get("/leader")
+def get_leader():
+    """Return the current leader. Used by tests to verify consensus."""
+    status = election.get_status()
+    return {
+        "leader_id": status["leader_id"],
+        "leader_url": status["leader_url"],
+        "node_id": status["node_id"],
+    }

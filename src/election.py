@@ -5,7 +5,7 @@ How it works:
 - Each node has a unique NODE_ID (integer). Higher ID = higher priority.
 - A node starts an election when it notices the leader is missing.
 - It sends ELECTION messages to all nodes with higher IDs.
-- If no higher node responds with OK \u2192 this node wins and broadcasts COORDINATOR.
+- If no higher node responds with OK → this node wins and broadcasts COORDINATOR.
 - Any node that receives ELECTION from a lower-ID node replies OK and starts its own election.
 """
 
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 NODE_ID = int(os.environ.get("NODE_ID", 1))
 PEERS_ENV = os.environ.get("PEERS", "")          # "http://node-2:8080,http://node-3:8080"
-ELECTION_TIMEOUT = float(os.environ.get("ELECTION_TIMEOUT", 3))
-HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", 5))
+ELECTION_TIMEOUT = float(os.environ.get("ELECTION_TIMEOUT", 2))
+HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", 3))
 
 # ---------- shared state ----------
 state = {
@@ -39,7 +39,7 @@ def get_peers() -> list[dict]:
         entry = entry.strip()
         if not entry:
             continue
-        # Expected format: "http://node-2:8080" \u2014 extract ID from hostname
+        # Expected format: "http://node-2:8080" — extract ID from hostname
         try:
             host = entry.split("//")[-1].split(":")[0]   # e.g. "node-2"
             peer_id = int(host.split("-")[-1])
@@ -81,7 +81,7 @@ def start_election():
     higher = higher_peers()
 
     if not higher:
-        # No higher nodes \u2014 we win immediately
+        # No higher nodes — we win immediately
         logger.info("[Node %d] No higher peers, declaring victory", NODE_ID)
         _finish_election_as_winner()
         return
@@ -94,7 +94,7 @@ def start_election():
             got_ok = True
 
     if not got_ok:
-        # No one responded \u2014 we win
+        # No one responded — we win
         logger.info("[Node %d] No OK received, declaring victory", NODE_ID)
         _finish_election_as_winner()
     else:
@@ -148,7 +148,7 @@ def heartbeat_check():
     If it's unreachable, start a new election.
     """
     # Give the cluster time to boot before the first check
-    time.sleep(HEARTBEAT_INTERVAL * 2)
+    time.sleep(HEARTBEAT_INTERVAL)
 
     while state["running"]:
         time.sleep(HEARTBEAT_INTERVAL)
